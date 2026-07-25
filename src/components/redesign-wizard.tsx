@@ -2820,17 +2820,17 @@ function Results({
     }
   }
 
-  // 실제 합성 로직과 같은 기준으로 최종 크기·파일 수·수용 한도를 미리 계산 (안내 표시용)
+  // 실제 합성 로직과 같은 기준으로 1장 크기·파일 수·수용 한도를 미리 계산 (안내 표시용)
   function mergePlan(width: number) {
     const count = downloadableSections.length;
     const sectionHeight = Math.max(1, Math.round(width / ratioNumber(project?.ratio || "9:16")));
     const perFile = Math.max(1, Math.floor(MAX_MERGED_PIXELS / (width * sectionHeight)));
     return {
-      totalHeight: sectionHeight * count,
+      sectionHeight,
       files: Math.max(1, Math.ceil(count / perFile)),
       capacityText: perFile >= maxProjectSections
-        ? `${maxProjectSections}장(최대)까지 한 파일`
-        : `${perFile}장까지 한 파일 · ${perFile + 1}장부터 자동 분할`
+        ? `최대 ${maxProjectSections}장(전부)까지 한 파일`
+        : `최대 ${perFile}장까지 한 파일 (${perFile + 1}장부터 자동 분할)`
     };
   }
 
@@ -2918,9 +2918,13 @@ function Results({
                     <span className="block text-sm font-semibold">{option.label}</span>
                     <span className="block text-xs text-muted-foreground">{option.detail}</span>
                     <span className="block text-xs text-[#0f766e]">
-                      📐 최종 파일: {option.width} × {plan.totalHeight.toLocaleString()}px ({downloadableSections.length}장) · {plan.files > 1 ? `${plan.files}개 파일로 분할` : "한 파일"}
+                      📐 1장 크기: {option.width} × {plan.sectionHeight.toLocaleString()}px · ✂ {plan.capacityText}
                     </span>
-                    <span className="block text-xs text-muted-foreground">✂ {plan.capacityText}</span>
+                    {plan.files > 1 && (
+                      <span className="block text-xs font-semibold text-[#c2410c]">
+                        지금 {downloadableSections.length}장은 {plan.files}개 파일로 나눠 저장됩니다
+                      </span>
+                    )}
                   </span>
                   {merging ? <Loader2 className="size-4 shrink-0 animate-spin" /> : <Download className="size-4 shrink-0 text-[#0f766e]" />}
                 </button>
@@ -2959,9 +2963,13 @@ function Results({
                 return (
                   <>
                     <p className="mt-1 text-xs text-[#0f766e]">
-                      📐 최종 파일: {width} × {plan.totalHeight.toLocaleString()}px ({downloadableSections.length}장) · {plan.files > 1 ? `${plan.files}개 파일로 분할` : "한 파일"}
+                      📐 1장 크기: {width} × {plan.sectionHeight.toLocaleString()}px · ✂ {plan.capacityText}
                     </p>
-                    <p className="mt-0.5 text-xs text-muted-foreground">✂ {plan.capacityText}</p>
+                    {plan.files > 1 && (
+                      <p className="mt-0.5 text-xs font-semibold text-[#c2410c]">
+                        지금 {downloadableSections.length}장은 {plan.files}개 파일로 나눠 저장됩니다
+                      </p>
+                    )}
                   </>
                 );
               })()}
