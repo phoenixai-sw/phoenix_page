@@ -2820,14 +2820,17 @@ function Results({
     }
   }
 
-  // 실제 합성 로직과 같은 기준으로 최종 크기·파일 수를 미리 계산 (안내 표시용)
+  // 실제 합성 로직과 같은 기준으로 최종 크기·파일 수·수용 한도를 미리 계산 (안내 표시용)
   function mergePlan(width: number) {
     const count = downloadableSections.length;
     const sectionHeight = Math.max(1, Math.round(width / ratioNumber(project?.ratio || "9:16")));
     const perFile = Math.max(1, Math.floor(MAX_MERGED_PIXELS / (width * sectionHeight)));
     return {
       totalHeight: sectionHeight * count,
-      files: Math.max(1, Math.ceil(count / perFile))
+      files: Math.max(1, Math.ceil(count / perFile)),
+      capacityText: perFile >= maxProjectSections
+        ? `${maxProjectSections}장(최대)까지 한 파일`
+        : `${perFile}장까지 한 파일 · ${perFile + 1}장부터 자동 분할`
     };
   }
 
@@ -2881,7 +2884,15 @@ function Results({
 
       <Dialog open={mergeOpen} onOpenChange={setMergeOpen}>
         <DialogContent>
-          <DialogHeader>
+          <DialogHeader className="relative">
+            <button
+              type="button"
+              aria-label="닫기"
+              onClick={() => setMergeOpen(false)}
+              className="absolute right-3 top-3 grid size-8 place-items-center rounded-md text-muted-foreground transition hover:bg-[#fff3ee] hover:text-foreground"
+            >
+              <X className="size-4" />
+            </button>
             <DialogTitle>한 장으로 다운로드</DialogTitle>
             <DialogDescription>
               {downloadableSections.length}장을 위에서 아래로 이어붙인 통이미지(JPG)로 저장합니다. 파일명에 폭이 기록됩니다. (예: 제목-한장-860px.jpg)
@@ -2909,6 +2920,7 @@ function Results({
                     <span className="block text-xs text-[#0f766e]">
                       📐 최종 파일: {option.width} × {plan.totalHeight.toLocaleString()}px ({downloadableSections.length}장) · {plan.files > 1 ? `${plan.files}개 파일로 분할` : "한 파일"}
                     </span>
+                    <span className="block text-xs text-muted-foreground">✂ {plan.capacityText}</span>
                   </span>
                   {merging ? <Loader2 className="size-4 shrink-0 animate-spin" /> : <Download className="size-4 shrink-0 text-[#0f766e]" />}
                 </button>
@@ -2945,9 +2957,12 @@ function Results({
                 }
                 const plan = mergePlan(width);
                 return (
-                  <p className="mt-1 text-xs text-[#0f766e]">
-                    📐 최종 파일: {width} × {plan.totalHeight.toLocaleString()}px ({downloadableSections.length}장) · {plan.files > 1 ? `${plan.files}개 파일로 분할` : "한 파일"}
-                  </p>
+                  <>
+                    <p className="mt-1 text-xs text-[#0f766e]">
+                      📐 최종 파일: {width} × {plan.totalHeight.toLocaleString()}px ({downloadableSections.length}장) · {plan.files > 1 ? `${plan.files}개 파일로 분할` : "한 파일"}
+                    </p>
+                    <p className="mt-0.5 text-xs text-muted-foreground">✂ {plan.capacityText}</p>
+                  </>
                 );
               })()}
             </div>
