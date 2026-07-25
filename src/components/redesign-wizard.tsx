@@ -1529,8 +1529,11 @@ function downloadBlob(blob: Blob, fileName: string) {
   }
 }
 
-// 모바일 브라우저 캔버스 면적 한계(iOS 등)를 넘지 않도록 통이미지를 나누는 기준
-const MAX_MERGED_PIXELS = 16_000_000;
+// 모바일 브라우저 캔버스 면적 한계(구형 iOS 16.77M) 바로 아래 안전선.
+// 1080px 폭 기준 9:16 8장(=16.59M)이 한 파일에 담기도록 맞춘 값.
+const MAX_MERGED_PIXELS = 16_600_000;
+const MERGE_MIN_WIDTH = 400;
+const MERGE_MAX_WIDTH = 2000;
 
 // 섹션 이미지를 세로로 이어붙인 통이미지(1~N장)로 저장한다. 저장된 파일 수를 반환.
 async function downloadSectionsAsSingleImage(projectTitle: string, sections: SectionResult[], targetWidth: number) {
@@ -2785,6 +2788,7 @@ function Results({
   const [downloadingZip, setDownloadingZip] = React.useState(false);
   const [mergeOpen, setMergeOpen] = React.useState(false);
   const [merging, setMerging] = React.useState(false);
+  const [customWidth, setCustomWidth] = React.useState("");
 
   if (!project) {
     return <Card><CardContent>아직 생성된 프로젝트가 없습니다.</CardContent></Card>;
@@ -2816,10 +2820,28 @@ function Results({
     }
   }
 
+  // 실제 합성 로직과 같은 기준으로 최종 크기·파일 수를 미리 계산 (안내 표시용)
+  function mergePlan(width: number) {
+    const count = downloadableSections.length;
+    const sectionHeight = Math.max(1, Math.round(width / ratioNumber(project?.ratio || "9:16")));
+    const perFile = Math.max(1, Math.floor(MAX_MERGED_PIXELS / (width * sectionHeight)));
+    return {
+      totalHeight: sectionHeight * count,
+      files: Math.max(1, Math.ceil(count / perFile))
+    };
+  }
+
   async function downloadMergedImage(targetWidth: number) {
     if (downloadableSections.length === 0) {
       onToast("다운로드할 이미지가 없습니다.");
       return;
+    }
+    if (!Number.isFinite(targetWidth) || targetWidth < MERGE_MIN_WIDTH || targetWidth > MERGE_MAX_WIDTH) {
+      onToast(`가로 폭은 ${MERGE_MIN_WIDTH}~${MERGE_MAX_WIDTH}px 사이로 입력해주세요.`);
+      return;
+    }
+    if (targetWidth > 1080) {
+      onToast("원본(1080px)보다 큰 폭은 화질이 흐려질 수 있습니다.");
     }
 
     setMerging(true);
@@ -2862,33 +2884,79 @@ function Results({
           <DialogHeader>
             <DialogTitle>한 장으로 다운로드</DialogTitle>
             <DialogDescription>
-              {downloadableSections.length}장을 위에서 아래로 이어붙인 통이미지 1장(JPG)으로 저장합니다. 사용할 채널에 맞는 가로 폭을 선택하세요.
+              {downloadableSections.length}장을 위에서 아래로 이어붙인 통이미지(JPG)로 저장합니다. 파일명에 폭이 기록됩니다. (예: 제목-한장-860px.jpg)
             </DialogDescription>
           </DialogHeader>
-          <div className="grid gap-2">
+          <div className="grid max-h-[52vh] gap-2 overflow-y-auto">
             {[
-              { width: 1080, label: "1080px · 원본 해상도", detail: "자사몰, 고해상도 보관용" },
-              { width: 860, label: "860px · 스마트스토어 권장", detail: "스마트스토어 상세 본문 폭" },
-              { width: 780, label: "780px · 쿠팡 권장", detail: "쿠팡 상세 본문 폭" }
-            ].map((option) => (
-              <button
-                key={option.width}
-                type="button"
-                disabled={merging}
-                onClick={() => downloadMergedImage(option.width)}
-                className="flex items-center justify-between rounded-md border border-border bg-white p-3 text-left transition hover:border-[#99e5d8] hover:bg-[#f4fbf9] disabled:opacity-50"
-              >
-                <span>
-                  <span className="block text-sm font-semibold">{option.label}</span>
-                  <span className="block text-xs text-muted-foreground">{option.detail}</span>
-                </span>
-                {merging ? <Loader2 className="size-4 animate-spin" /> : <Download className="size-4 text-[#0f766e]" />}
-              </button>
-            ))}
+              { width: 1080, label: "1080px · 원본 화질(마스터)", detail: "보관·재편집·자사몰용 — 축소는 가능, 확대는 불가" },
+              { width: 860, label: "860px · 스마트스토어 권장", detail: "상세 본문에 딱 맞는 폭 — 재압축 열화 최소화" },
+              { width: 780, label: "780px · 쿠팡 권장", detail: "상세 본문에 딱 맞는 폭 — 재압축 열화 최소화" },
+              { width: 750, label: "750px · 모바일 웹 표준", detail: "카페24·아임웹 등 자체 쇼핑몰/빌더에 무난한 폭" }
+            ].map((option) => {
+              const plan = mergePlan(option.width);
+              return (
+                <button
+                  key={option.width}
+                  type="button"
+                  disabled={merging}
+                  onClick={() => downloadMergedImage(option.width)}
+                  className="flex items-center justify-between gap-3 rounded-md border border-border bg-white p-3 text-left transition hover:border-[#99e5d8] hover:bg-[#f4fbf9] disabled:opacity-50"
+                >
+                  <span className="min-w-0">
+                    <span className="block text-sm font-semibold">{option.label}</span>
+                    <span className="block text-xs text-muted-foreground">{option.detail}</span>
+                    <span className="block text-xs text-[#0f766e]">
+                      📐 최종 파일: {option.width} × {plan.totalHeight.toLocaleString()}px ({downloadableSections.length}장) · {plan.files > 1 ? `${plan.files}개 파일로 분할` : "한 파일"}
+                    </span>
+                  </span>
+                  {merging ? <Loader2 className="size-4 shrink-0 animate-spin" /> : <Download className="size-4 shrink-0 text-[#0f766e]" />}
+                </button>
+              );
+            })}
+
+            <div className="rounded-md border border-border bg-white p-3">
+              <div className="flex items-center gap-2">
+                <span className="text-sm font-semibold">직접 입력</span>
+                <Input
+                  value={customWidth}
+                  onChange={(event) => setCustomWidth(event.target.value.replace(/[^0-9]/g, ""))}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") downloadMergedImage(Number(customWidth));
+                  }}
+                  placeholder="900"
+                  inputMode="numeric"
+                  aria-label="직접 입력 가로 폭(px)"
+                  className="h-8 w-24"
+                />
+                <span className="text-sm text-muted-foreground">px</span>
+                <Button size="sm" disabled={merging || !customWidth} onClick={() => downloadMergedImage(Number(customWidth))}>
+                  {merging ? <Loader2 className="size-4 animate-spin" /> : <Download className="size-4" />}저장
+                </Button>
+              </div>
+              <p className="mt-1 text-xs text-muted-foreground">
+                사용 플랫폼의 권장 폭을 알고 있다면 직접 지정 ({MERGE_MIN_WIDTH}~{MERGE_MAX_WIDTH}) — 1080보다 크면 흐려질 수 있어요
+              </p>
+              {(() => {
+                const width = Number(customWidth);
+                if (!customWidth || !Number.isFinite(width)) return null;
+                if (width < MERGE_MIN_WIDTH || width > MERGE_MAX_WIDTH) {
+                  return <p className="mt-1 text-xs font-semibold text-[#c2410c]">{MERGE_MIN_WIDTH}~{MERGE_MAX_WIDTH}px 사이로 입력해주세요</p>;
+                }
+                const plan = mergePlan(width);
+                return (
+                  <p className="mt-1 text-xs text-[#0f766e]">
+                    📐 최종 파일: {width} × {plan.totalHeight.toLocaleString()}px ({downloadableSections.length}장) · {plan.files > 1 ? `${plan.files}개 파일로 분할` : "한 파일"}
+                  </p>
+                );
+              })()}
+            </div>
           </div>
-          <p className="text-xs text-muted-foreground">
-            길이가 매우 길면(모바일 한계 초과) 자동으로 상·하편 2개 파일로 나눠 저장됩니다. 장별 파일이 필요하면 <strong>다운로드(낱장)</strong>을 이용하세요.
-          </p>
+          <div className="grid gap-1 text-xs text-muted-foreground">
+            <p>💡 고민되면 <strong>1080px(마스터)</strong>를 받아두세요 — 나중에 어떤 크기로든 줄일 수 있습니다.</p>
+            <p>📄 분할 저장 시 파일명에 1부·2부가 붙습니다. 폭이 좁을수록 더 많은 장수도 한 파일로 저장됩니다.</p>
+            <p>🗂 장별 개별 파일이 필요하면 <strong>다운로드(낱장)</strong>을 이용하세요.</p>
+          </div>
         </DialogContent>
       </Dialog>
 
