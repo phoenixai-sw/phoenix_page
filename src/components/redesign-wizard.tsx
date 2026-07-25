@@ -1529,6 +1529,72 @@ function downloadBlob(blob: Blob, fileName: string) {
   }
 }
 
+// 모바일 브라우저 캔버스 면적 한계(iOS 등)를 넘지 않도록 통이미지를 나누는 기준
+const MAX_MERGED_PIXELS = 16_000_000;
+
+// 섹션 이미지를 세로로 이어붙인 통이미지(1~N장)로 저장한다. 저장된 파일 수를 반환.
+async function downloadSectionsAsSingleImage(projectTitle: string, sections: SectionResult[], targetWidth: number) {
+  const images: HTMLImageElement[] = [];
+  for (const section of sections) {
+    if (!section.imageUrl) continue;
+    const dataUrl = section.imageUrl.startsWith("data:")
+      ? section.imageUrl
+      : await blobToDataUrl(await imageUrlToBlob(section.imageUrl));
+    images.push(await loadDataUrlImage(dataUrl));
+  }
+  if (images.length === 0) throw new Error("이어붙일 이미지가 없습니다.");
+
+  const scaledHeights = images.map((image) => {
+    const width = image.naturalWidth || 1080;
+    const height = image.naturalHeight || 1920;
+    return Math.max(1, Math.round(targetWidth * (height / width)));
+  });
+
+  // 캔버스 면적 한계 안에서 섹션을 묶어 파일(chunk)로 나눈다
+  const chunks: Array<{ start: number; end: number; height: number }> = [];
+  let start = 0;
+  let chunkHeight = 0;
+  for (let index = 0; index < images.length; index += 1) {
+    const nextHeight = chunkHeight + scaledHeights[index];
+    if (chunkHeight > 0 && targetWidth * nextHeight > MAX_MERGED_PIXELS) {
+      chunks.push({ start, end: index, height: chunkHeight });
+      start = index;
+      chunkHeight = scaledHeights[index];
+    } else {
+      chunkHeight = nextHeight;
+    }
+  }
+  chunks.push({ start, end: images.length, height: chunkHeight });
+
+  const baseName = sanitizeDownloadName(projectTitle || "redesign-results");
+  for (const [chunkIndex, chunk] of chunks.entries()) {
+    const canvas = document.createElement("canvas");
+    canvas.width = targetWidth;
+    canvas.height = chunk.height;
+    const context = canvas.getContext("2d", { alpha: false });
+    if (!context) throw new Error("통이미지 캔버스를 만들지 못했습니다.");
+    context.fillStyle = "#ffffff";
+    context.fillRect(0, 0, canvas.width, canvas.height);
+
+    let offsetY = 0;
+    for (let index = chunk.start; index < chunk.end; index += 1) {
+      context.drawImage(images[index], 0, offsetY, targetWidth, scaledHeights[index]);
+      offsetY += scaledHeights[index];
+    }
+
+    const blob = await new Promise<Blob>((resolve, reject) => {
+      canvas.toBlob((result) => {
+        if (result) resolve(result);
+        else reject(new Error("통이미지를 저장하지 못했습니다."));
+      }, "image/jpeg", 0.92);
+    });
+    const partLabel = chunks.length > 1 ? `-${chunkIndex + 1}부` : "";
+    downloadBlob(blob, `${baseName}-한장${partLabel}-${targetWidth}px.jpg`);
+  }
+
+  return chunks.length;
+}
+
 async function downloadSectionsAsZip(projectTitle: string, sections: SectionResult[]) {
   const zip = new JSZip();
   for (const [index, section] of sections.entries()) {
@@ -2717,6 +2783,8 @@ function Results({
   editingSectionId: string | null;
 }) {
   const [downloadingZip, setDownloadingZip] = React.useState(false);
+  const [mergeOpen, setMergeOpen] = React.useState(false);
+  const [merging, setMerging] = React.useState(false);
 
   if (!project) {
     return <Card><CardContent>아직 생성된 프로젝트가 없습니다.</CardContent></Card>;
@@ -2748,6 +2816,28 @@ function Results({
     }
   }
 
+  async function downloadMergedImage(targetWidth: number) {
+    if (downloadableSections.length === 0) {
+      onToast("다운로드할 이미지가 없습니다.");
+      return;
+    }
+
+    setMerging(true);
+    try {
+      const fileCount = await downloadSectionsAsSingleImage(title, downloadableSections, targetWidth);
+      setMergeOpen(false);
+      onToast(
+        fileCount > 1
+          ? `길이가 길어 ${fileCount}개 파일(상·하편)로 나눠 저장했습니다. (${targetWidth}px)`
+          : `${downloadableSections.length}장을 한 장으로 이어 저장했습니다. (${targetWidth}px)`
+      );
+    } catch (error) {
+      onToast(error instanceof Error ? error.message : "한 장 다운로드 중 오류가 발생했습니다.");
+    } finally {
+      setMerging(false);
+    }
+  }
+
   return (
     <section>
       <Topbar eyebrow="OUTPUT" title={title}>
@@ -2757,11 +2847,50 @@ function Results({
           <br />· 홈보드의 <strong>내 클라우드</strong>에서 다른 기기로도 불러올 수 있습니다
         </InfoTip>
         <Button variant="secondary" onClick={() => onToast("히어로 1장 재생성은 다음 단계에서 연결할 예정입니다.")}><RefreshCw className="size-4" />히어로 다시 생성</Button>
+        <Button variant="secondary" onClick={() => setMergeOpen(true)} disabled={downloadableSections.length === 0 || merging}>
+          {merging ? <Loader2 className="size-4 animate-spin" /> : <ImageIcon className="size-4" />}
+          다운로드(한장)
+        </Button>
         <Button onClick={downloadAllImages} disabled={downloadableSections.length === 0 || downloadingZip}>
           {downloadingZip ? <Loader2 className="size-4 animate-spin" /> : <Download className="size-4" />}
-          결과 다운로드
+          다운로드(낱장)
         </Button>
       </Topbar>
+
+      <Dialog open={mergeOpen} onOpenChange={setMergeOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>한 장으로 다운로드</DialogTitle>
+            <DialogDescription>
+              {downloadableSections.length}장을 위에서 아래로 이어붙인 통이미지 1장(JPG)으로 저장합니다. 사용할 채널에 맞는 가로 폭을 선택하세요.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-2">
+            {[
+              { width: 1080, label: "1080px · 원본 해상도", detail: "자사몰, 고해상도 보관용" },
+              { width: 860, label: "860px · 스마트스토어 권장", detail: "스마트스토어 상세 본문 폭" },
+              { width: 780, label: "780px · 쿠팡 권장", detail: "쿠팡 상세 본문 폭" }
+            ].map((option) => (
+              <button
+                key={option.width}
+                type="button"
+                disabled={merging}
+                onClick={() => downloadMergedImage(option.width)}
+                className="flex items-center justify-between rounded-md border border-border bg-white p-3 text-left transition hover:border-[#99e5d8] hover:bg-[#f4fbf9] disabled:opacity-50"
+              >
+                <span>
+                  <span className="block text-sm font-semibold">{option.label}</span>
+                  <span className="block text-xs text-muted-foreground">{option.detail}</span>
+                </span>
+                {merging ? <Loader2 className="size-4 animate-spin" /> : <Download className="size-4 text-[#0f766e]" />}
+              </button>
+            ))}
+          </div>
+          <p className="text-xs text-muted-foreground">
+            길이가 매우 길면(모바일 한계 초과) 자동으로 상·하편 2개 파일로 나눠 저장됩니다. 장별 파일이 필요하면 <strong>다운로드(낱장)</strong>을 이용하세요.
+          </p>
+        </DialogContent>
+      </Dialog>
 
       <div className={cn("grid gap-4", showRollout ? "grid-cols-[minmax(0,1fr)_320px] max-xl:grid-cols-1" : "grid-cols-1")}>
         <Card>
