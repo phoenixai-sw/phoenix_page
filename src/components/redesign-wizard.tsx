@@ -2462,7 +2462,15 @@ function Workspace(props: {
           <Card>
             <CardHeader>
               <div>
-                <CardTitle>원본 자료 가져오기</CardTitle>
+                <CardTitle className="flex items-center gap-1">
+                  원본 자료 가져오기
+                  <InfoTip label="업로드 규칙 안내">
+                    <strong>여러 장 업로드 가능, 용량 제한 없음</strong> (자동 압축 후 안전하게 전송됩니다)
+                    <br />· 생성 참조로는 최대 <strong>6장</strong>이 사용됩니다
+                    <br />· 세로로 긴 상세페이지는 2장으로 분할, PDF는 앞 4페이지 사용
+                    <br />· 어떤 파일이 쓰이는지는 업로드 후 아래 <strong>참조 사용 계획</strong>에 표시됩니다
+                  </InfoTip>
+                </CardTitle>
                 <CardDescription>이미지 또는 PDF를 첨부하면 원본 정보와 전환 저해 요소를 분석합니다.</CardDescription>
               </div>
               <Badge variant="green">대용량 가능</Badge>
@@ -2744,6 +2752,10 @@ function Results({
     <section>
       <Topbar eyebrow="OUTPUT" title={title}>
         <Button variant="secondary" onClick={onSave}><FileText className="size-4" />결과 저장</Button>
+        <InfoTip label="저장 방식 안내" align="right">
+          저장하면 <strong>이 기기(브라우저)</strong>에 보관되고, Google 로그인 상태면 <strong>클라우드에도 자동 동기화</strong>됩니다.
+          <br />· 홈보드의 <strong>내 클라우드</strong>에서 다른 기기로도 불러올 수 있습니다
+        </InfoTip>
         <Button variant="secondary" onClick={() => onToast("히어로 1장 재생성은 다음 단계에서 연결할 예정입니다.")}><RefreshCw className="size-4" />히어로 다시 생성</Button>
         <Button onClick={downloadAllImages} disabled={downloadableSections.length === 0 || downloadingZip}>
           {downloadingZip ? <Loader2 className="size-4 animate-spin" /> : <Download className="size-4" />}
@@ -2800,6 +2812,38 @@ const quickEditPresets = [
   ["안전 표현", "과장되거나 효능을 단정하는 표현은 줄이고 식품/건강 카테고리에 안전한 표현으로 완화해주세요."]
 ];
 
+function InfoTip({ label, align = "center", children }: { label: string; align?: "center" | "right"; children: React.ReactNode }) {
+  const [open, setOpen] = React.useState(false);
+
+  return (
+    <span className="relative inline-flex align-middle">
+      <button
+        type="button"
+        aria-label={label}
+        aria-expanded={open}
+        className="grid size-5 place-items-center rounded-full text-muted-foreground transition hover:text-[#0f766e] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#99e5d8]"
+        onMouseEnter={() => setOpen(true)}
+        onMouseLeave={() => setOpen(false)}
+        onClick={() => setOpen((current) => !current)}
+        onBlur={() => setOpen(false)}
+      >
+        <CircleHelp className="size-4" />
+      </button>
+      {open && (
+        <span
+          role="tooltip"
+          className={cn(
+            "absolute top-full z-50 mt-2 w-72 rounded-md border border-border bg-white p-3 text-left text-xs font-normal leading-relaxed text-foreground shadow-lg",
+            align === "right" ? "right-0" : "left-1/2 -translate-x-1/2"
+          )}
+        >
+          {children}
+        </span>
+      )}
+    </span>
+  );
+}
+
 function AddSectionCard({
   currentCount,
   maxCount,
@@ -2821,7 +2865,15 @@ function AddSectionCard({
           <Badge variant={remaining > 0 ? "green" : "default"}>
             현재 {currentCount}장 / 최대 {maxCount}장
           </Badge>
-          <h3 className="mt-3 text-base font-bold">페이지 추가 생성</h3>
+          <h3 className="mt-3 flex items-center justify-center gap-1 text-base font-bold">
+            페이지 추가 생성
+            <InfoTip label="추가 생성 방식 안내">
+              추가 생성은 <strong>처음 업로드한 원본을 보존해 두었다가 기준으로 사용</strong>합니다.
+              <br />· 기존 페이지들의 제품 정보·톤을 그대로 유지합니다
+              <br />· 히어로와 최근 페이지도 스타일 참고로 함께 반영됩니다
+              <br />· 클라우드에 저장해두면 다른 기기에서도 이어서 추가 생성할 수 있습니다
+            </InfoTip>
+          </h3>
           <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
             마지막 페이지 뒤에 이어질 섹션을 추가합니다. 현재 작업의 비율, 판매 채널, 요청 메모를 유지합니다.
           </p>
