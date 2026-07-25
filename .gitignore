@@ -17,3 +17,9 @@ pnpm-debug.log*
 
 tsconfig.tsbuildinfo
 next-env.d.ts
+
+# AI tool artifacts (auto-installed)
+.agents/
+.claude/skills/
+skills-lock.json
+*.log
