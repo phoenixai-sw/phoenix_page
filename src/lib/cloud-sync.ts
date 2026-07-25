@@ -125,6 +125,15 @@ export async function fetchCloudProject(localId: string): Promise<CloudProjectRo
   return data;
 }
 
+export async function renameCloudProject(localId: string, title: string) {
+  const supabase = requireSupabase();
+  const { error } = await supabase
+    .from("projects")
+    .update({ title, updated_at: new Date().toISOString() })
+    .eq("local_id", localId);
+  if (error) throw new Error(error.message);
+}
+
 export async function deleteCloudProject(localId: string) {
   const supabase = requireSupabase();
   const { error } = await supabase.from("projects").delete().eq("local_id", localId);

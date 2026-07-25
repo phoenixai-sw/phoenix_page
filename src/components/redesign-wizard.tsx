@@ -38,6 +38,7 @@ import {
   fetchCloudProject,
   isCloudConfigured,
   listCloudProjects,
+  renameCloudProject,
   signInWithGoogle,
   signOutCloud,
   subscribeCloudUser,
@@ -284,6 +285,8 @@ export function RedesignWizard() {
   const [cloudOpen, setCloudOpen] = React.useState(false);
   const [cloudRows, setCloudRows] = React.useState<CloudProjectSummary[]>([]);
   const [cloudBusy, setCloudBusy] = React.useState(false);
+  const [editingCloudId, setEditingCloudId] = React.useState("");
+  const [cloudDraftTitle, setCloudDraftTitle] = React.useState("");
   const inputRef = React.useRef<HTMLInputElement>(null);
   const knowledgeInputRef = React.useRef<HTMLInputElement>(null);
   const generationAbortRef = React.useRef<AbortController | null>(null);
@@ -650,6 +653,41 @@ export function RedesignWizard() {
       setToast("작업 제목을 수정했습니다.");
     } catch (error) {
       setToast(error instanceof Error ? error.message : "작업 제목 수정 중 오류가 발생했습니다.");
+      return;
+    }
+
+    if (cloudUser) {
+      renameCloudProject(updatedProject.id, title).catch(() => {
+        // 클라우드에 아직 저장되지 않은 작업이거나 일시적 오류 — 로컬 수정은 유지한다.
+      });
+    }
+  }
+
+  async function renameCloudRow(localId: string, nextTitle: string) {
+    const title = nextTitle.trim();
+    if (!title) {
+      setToast("새 제목을 입력해주세요.");
+      return;
+    }
+
+    setCloudBusy(true);
+    try {
+      await renameCloudProject(localId, title);
+      setCloudRows((current) => current.map((row) => (row.local_id === localId ? { ...row, title } : row)));
+      const localCopy = projects.find((candidate) => candidate.id === localId);
+      if (localCopy) {
+        const updated = { ...localCopy, title };
+        await saveProjectToDb(updated);
+        setProjects((current) => current.map((candidate) => (candidate.id === localId ? updated : candidate)));
+        setActiveProject((current) => current?.id === localId ? { ...current, title } : current);
+      }
+      setEditingCloudId("");
+      setCloudDraftTitle("");
+      setToast("클라우드 작업 제목을 수정했습니다.");
+    } catch (error) {
+      setToast(error instanceof Error ? error.message : "클라우드 제목 수정 중 오류가 발생했습니다.");
+    } finally {
+      setCloudBusy(false);
     }
   }
 
@@ -1079,22 +1117,59 @@ export function RedesignWizard() {
                 아직 클라우드에 저장된 작업이 없습니다. 결과 화면에서 저장하면 자동으로 동기화됩니다.
               </div>
             ) : (
-              cloudRows.map((row) => (
+              cloudRows.map((row) => {
+                const isEditingRow = editingCloudId === row.local_id;
+                return (
                 <div key={row.local_id} className="flex items-center justify-between gap-3 rounded-md border border-border bg-white p-3">
-                  <div className="min-w-0">
-                    <div className="truncate text-sm font-semibold">{row.title}</div>
+                  <div className="min-w-0 flex-1">
+                    {isEditingRow ? (
+                      <Input
+                        value={cloudDraftTitle}
+                        onChange={(event) => setCloudDraftTitle(event.target.value)}
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter") renameCloudRow(row.local_id, cloudDraftTitle);
+                          if (event.key === "Escape") {
+                            setEditingCloudId("");
+                            setCloudDraftTitle("");
+                          }
+                        }}
+                        aria-label="클라우드 작업 제목 수정"
+                        autoFocus
+                      />
+                    ) : (
+                      <div className="truncate text-sm font-semibold">{row.title}</div>
+                    )}
                     <div className="text-xs text-muted-foreground">
                       {row.channel || "채널 미지정"} · {row.ratio || "9:16"} · {new Date(row.updated_at).toLocaleString("ko-KR")}
                     </div>
                   </div>
                   <div className="flex shrink-0 items-center gap-2">
-                    <Button size="sm" disabled={cloudBusy} onClick={() => loadFromCloud(row.local_id)}><Download className="size-4" />불러오기</Button>
-                    <Button size="sm" variant="ghost" disabled={cloudBusy} onClick={() => removeFromCloud(row.local_id)} aria-label={`${row.title} 클라우드에서 삭제`}>
-                      <Trash2 className="size-4" />
-                    </Button>
+                    {isEditingRow ? (
+                      <>
+                        <Button size="sm" disabled={cloudBusy} onClick={() => renameCloudRow(row.local_id, cloudDraftTitle)}><Check className="size-4" />저장</Button>
+                        <Button size="sm" variant="ghost" disabled={cloudBusy} onClick={() => { setEditingCloudId(""); setCloudDraftTitle(""); }}>취소</Button>
+                      </>
+                    ) : (
+                      <>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          disabled={cloudBusy}
+                          onClick={() => { setEditingCloudId(row.local_id); setCloudDraftTitle(row.title); }}
+                          aria-label={`${row.title} 제목 수정`}
+                        >
+                          <Pencil className="size-4" />
+                        </Button>
+                        <Button size="sm" disabled={cloudBusy} onClick={() => loadFromCloud(row.local_id)}><Download className="size-4" />불러오기</Button>
+                        <Button size="sm" variant="ghost" disabled={cloudBusy} onClick={() => removeFromCloud(row.local_id)} aria-label={`${row.title} 클라우드에서 삭제`}>
+                          <Trash2 className="size-4" />
+                        </Button>
+                      </>
+                    )}
                   </div>
                 </div>
-              ))
+                );
+              })
             )}
           </div>
           <div className="flex justify-end gap-2">
