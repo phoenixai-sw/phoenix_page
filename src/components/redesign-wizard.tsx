@@ -35,6 +35,7 @@ import {
   type CloudProjectSummary,
   type CloudUser,
   deleteCloudProject,
+  deleteStoredReferences,
   fetchCloudProject,
   isCloudConfigured,
   listCloudProjects,
@@ -83,6 +84,7 @@ type Project = {
   sections: SectionResult[];
   analysis?: unknown;
   savedAt?: string;
+  sourcePaths?: string[];
 };
 
 type KnowledgeItem = {
@@ -431,27 +433,50 @@ export function RedesignWizard() {
 
     try {
       const form = new FormData();
-      const uploadFiles = files.length > 0
-        ? await normalizeFilesForUpload(files)
-        : await projectImagesToReferenceFiles(baseProject);
-      if (uploadFiles.length === 0) {
+
+      // 참조 소스 우선순위: ① 보존된 원본 경로 ② 새 업로드 파일 ③ 기존 결과 이미지(레거시 폴백)
+      const baseSourcePaths = (baseProject?.sourcePaths || []).filter(Boolean);
+      let sourcePaths: string[] = [];
+      let directFiles: File[] = [];
+      let anchorFiles: File[] = [];
+
+      if (baseSourcePaths.length > 0) {
+        sourcePaths = baseSourcePaths.slice(0, 4);
+        anchorFiles = await projectStyleAnchorFiles(baseProject);
+      } else if (files.length > 0) {
+        const uploadFiles = await normalizeFilesForUpload(files);
+        const uploaded = await uploadReferenceFilesToStorage(uploadFiles);
+        if (uploaded) sourcePaths = uploaded;
+        else directFiles = uploadFiles;
+        if (baseProject) anchorFiles = await projectStyleAnchorFiles(baseProject);
+      } else {
+        directFiles = await projectImagesToReferenceFiles(baseProject);
+      }
+
+      if (sourcePaths.length === 0 && directFiles.length === 0) {
         setToast("추가 생성에 사용할 원본 자료나 기존 결과 이미지가 없습니다.");
         return null;
       }
       if (abortController.signal.aborted) throw new DOMException("생성 요청을 취소했습니다.", "AbortError");
-      setToast(files.length > 0 ? "원본 분석과 실제 이미지 생성을 시작합니다." : "기존 결과 이미지를 참고해 추가 생성을 시작합니다.");
+      setToast(
+        sourcePaths.length > 0 && baseSourcePaths.length > 0
+          ? "보존된 원본과 기존 결과 스타일을 참고해 생성을 시작합니다."
+          : files.length > 0
+            ? "원본 분석과 실제 이미지 생성을 시작합니다."
+            : "기존 결과 이미지를 참고해 추가 생성을 시작합니다."
+      );
       const knowledgeText = useSharedKnowledge
         ? knowledgeItems
             .map((item, index) => `# 맞춤형 Data 설정 ${index + 1}: ${item.name}\n${item.text}`)
             .join("\n\n")
             .slice(0, 60000)
         : "";
-      const storagePaths = await uploadReferenceFilesToStorage(uploadFiles);
-      if (storagePaths) {
-        form.append("storagePaths", JSON.stringify(storagePaths));
-      } else {
-        uploadFiles.forEach((file) => form.append("files", file));
+      if (sourcePaths.length > 0) {
+        form.append("storagePaths", JSON.stringify(sourcePaths));
+        form.append("persistStorage", "true");
       }
+      directFiles.forEach((file) => form.append("files", file));
+      anchorFiles.forEach((file) => form.append("files", file));
       form.append("knowledgeText", knowledgeText);
       form.append("useKnowledge", String(useSharedKnowledge));
       form.append("knowledgeAccessKey", knowledgeAccessKey);
@@ -487,6 +512,7 @@ export function RedesignWizard() {
       const project: Project = {
         ...data.project,
         title: projectDisplayTitle(data.project),
+        sourcePaths: sourcePaths.length > 0 ? sourcePaths : baseProject?.sourcePaths || [],
         sections: await Promise.all(
           data.project.sections.map(async (section: Record<string, string>) => ({
             id: section.section_id,
@@ -588,6 +614,7 @@ export function RedesignWizard() {
       await deleteProjectFromDb(project.id);
       setProjects((current) => current.filter((candidate) => candidate.id !== project.id));
       setActiveProject((current) => current?.id === project.id ? null : current);
+      void deleteStoredReferences(project.sourcePaths || []);
       setToast("작업을 삭제했습니다.");
     } catch (error) {
       setToast(error instanceof Error ? error.message : "작업 삭제 중 오류가 발생했습니다.");
@@ -829,7 +856,10 @@ export function RedesignWizard() {
         request: row.request || "",
         createdAt: row.created_at,
         sections,
-        savedAt: row.updated_at
+        savedAt: row.updated_at,
+        sourcePaths: Array.isArray(row.source_paths)
+          ? row.source_paths.filter((path): path is string => typeof path === "string")
+          : []
       };
       await saveProjectToDb(restored);
       setProjects((current) => [restored, ...current.filter((candidate) => candidate.id !== restored.id)].slice(0, 20));
@@ -1415,7 +1445,8 @@ function cloudPayloadFromProject(project: Project) {
     ratio: project.ratio,
     model: project.model,
     request: project.request,
-    sections: project.sections
+    sections: project.sections,
+    sourcePaths: project.sourcePaths || []
   };
 }
 
@@ -1468,7 +1499,8 @@ function mergeGeneratedProject(baseProject: Project, generatedProject: Project):
     count: sections.length,
     sections,
     analysis: generatedProject.analysis || baseProject.analysis,
-    createdAt: baseProject.createdAt || generatedProject.createdAt
+    createdAt: baseProject.createdAt || generatedProject.createdAt,
+    sourcePaths: generatedProject.sourcePaths?.length ? generatedProject.sourcePaths : baseProject.sourcePaths || []
   };
 }
 
@@ -1881,6 +1913,8 @@ async function extractPdfText(file: File) {
 
 // Vercel 서버리스 요청 본문 한도(4.5MB) 아래로 유지하기 위한 업로드 총량 상한
 const MAX_UPLOAD_TOTAL_BYTES = 3_500_000;
+// 생성 참조로 사용하는 최대 이미지 수 (서버 MAX_REFERENCE_IMAGES와 일치)
+const MAX_REFERENCE_FILES = 6;
 
 async function normalizeFilesForUpload(files: File[]) {
   const output: File[] = [];
@@ -1892,7 +1926,7 @@ async function normalizeFilesForUpload(files: File[]) {
     }
   }
 
-  let selected = output.slice(0, 4);
+  let selected = output.slice(0, MAX_REFERENCE_FILES);
   const totalBytes = selected.reduce((sum, file) => sum + file.size, 0);
   if (totalBytes > MAX_UPLOAD_TOTAL_BYTES) {
     selected = await Promise.all(selected.map((file) => recompressReferenceFile(file, 1000, 1500, 0.72)));
@@ -1950,6 +1984,72 @@ async function projectImagesToReferenceFiles(project?: Project | null) {
   return output;
 }
 
+type UploadPlan = {
+  totalConverted: number;
+  used: number;
+  dropped: number;
+  longSlices: number;
+};
+
+// 업로드 파일이 실제 몇 장의 참조로 변환·사용되는지 미리 계산한다 (업로드 투명화).
+async function estimateUploadPlan(files: File[]): Promise<UploadPlan | null> {
+  if (files.length === 0) return null;
+
+  let totalConverted = 0;
+  let longSlices = 0;
+
+  for (const file of files) {
+    try {
+      if (file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf")) {
+        const pdfjs = await import("pdfjs-dist");
+        pdfjs.GlobalWorkerOptions.workerSrc = new URL("pdfjs-dist/build/pdf.worker.mjs", import.meta.url).toString();
+        const pdf = await pdfjs.getDocument({ data: await file.arrayBuffer() }).promise;
+        totalConverted += Math.min(pdf.numPages, 4);
+      } else if (file.type.startsWith("image/")) {
+        const image = await loadImageElement(file);
+        const naturalWidth = image.naturalWidth || image.width;
+        const naturalHeight = image.naturalHeight || image.height;
+        URL.revokeObjectURL(image.src);
+        const isLong = naturalWidth > 0 && naturalHeight / naturalWidth > 2.2;
+        const slices = isLong ? Math.min(2, Math.ceil(naturalHeight / naturalWidth / 1.8)) : 1;
+        if (isLong) longSlices += slices;
+        totalConverted += slices;
+      }
+    } catch {
+      totalConverted += 1;
+    }
+  }
+
+  const used = Math.min(totalConverted, MAX_REFERENCE_FILES);
+  return { totalConverted, used, dropped: Math.max(0, totalConverted - used), longSlices };
+}
+
+// 추가 생성 시 기존 결과와의 톤 유지를 위한 스타일 앵커 (히어로 + 최신 섹션, 최대 2장)
+async function projectStyleAnchorFiles(project?: Project | null) {
+  const sectionsWithImages = (project?.sections || []).filter((section) => section.imageUrl);
+  if (sectionsWithImages.length === 0) return [];
+
+  const anchors = [sectionsWithImages[0]];
+  const latest = sectionsWithImages[sectionsWithImages.length - 1];
+  if (latest !== sectionsWithImages[0]) anchors.push(latest);
+
+  const output: File[] = [];
+  for (const [index, section] of anchors.entries()) {
+    try {
+      const sourceUrl = section.imageUrl || "";
+      const sourceDataUrl = sourceUrl.startsWith("data:")
+        ? sourceUrl
+        : await blobToDataUrl(await imageUrlToBlob(sourceUrl));
+      const compressedDataUrl = await compressReferenceImageForUpload(sourceDataUrl);
+      const blob = dataUrlToBlob(compressedDataUrl);
+      output.push(new File([blob], `${section.id || `anchor-${index + 1}`}-style-anchor.jpg`, { type: "image/jpeg" }));
+    } catch {
+      // 스타일 앵커 준비 실패가 생성 자체를 막으면 안 된다.
+    }
+  }
+  return output;
+}
+
 async function renderImageToReferenceFiles(file: File) {
   const image = await loadImageElement(file);
   const naturalWidth = image.naturalWidth || image.width;
@@ -1957,7 +2057,8 @@ async function renderImageToReferenceFiles(file: File) {
   if (!naturalWidth || !naturalHeight) throw new Error("업로드 이미지를 읽지 못했습니다.");
 
   const isLongDetailPage = naturalHeight / naturalWidth > 2.2;
-  const sliceCount = isLongDetailPage ? Math.min(4, Math.ceil(naturalHeight / naturalWidth / 1.8)) : 1;
+  // 긴 상세페이지는 최대 2분할로 제한해 제품컷 등 다른 참조 슬롯을 확보한다.
+  const sliceCount = isLongDetailPage ? Math.min(2, Math.ceil(naturalHeight / naturalWidth / 1.8)) : 1;
   const files: File[] = [];
 
   for (let index = 0; index < sliceCount; index += 1) {
@@ -2338,6 +2439,18 @@ function Workspace(props: {
     onGenerate
   } = props;
 
+  const [uploadPlan, setUploadPlan] = React.useState<UploadPlan | null>(null);
+
+  React.useEffect(() => {
+    let cancelled = false;
+    estimateUploadPlan(files).then((plan) => {
+      if (!cancelled) setUploadPlan(plan);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [files]);
+
   return (
     <section>
       <Topbar eyebrow="STUDIO">
@@ -2389,6 +2502,13 @@ function Workspace(props: {
                     </Badge>
                   ))}
                 </div>
+              )}
+              {uploadPlan && (
+                <p className={cn("mt-2 text-xs", uploadPlan.dropped > 0 ? "font-semibold text-[#c2410c]" : "text-muted-foreground")}>
+                  참조 사용 계획: 변환 {uploadPlan.totalConverted}장 중 <strong>{uploadPlan.used}장 사용</strong>
+                  {uploadPlan.longSlices > 0 ? ` (긴 상세페이지 분할 ${uploadPlan.longSlices}장 포함)` : ""}
+                  {uploadPlan.dropped > 0 ? ` · ${uploadPlan.dropped}장은 참조 한도(${MAX_REFERENCE_FILES}장) 초과로 반영되지 않습니다` : ""}
+                </p>
               )}
               <label className="mt-4 block text-xs font-bold text-muted-foreground">제작 요청 메모</label>
               <Textarea value={request} onChange={(event) => setRequest(event.target.value)} />

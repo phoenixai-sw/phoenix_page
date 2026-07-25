@@ -7,6 +7,7 @@ export const runtime = "nodejs";
 const UPLOAD_BUCKET = "uploads";
 const MAX_FILES = 8;
 const MAX_FILE_BYTES = 15 * 1024 * 1024;
+const STORAGE_PATH_PATTERN = /^ref\/[0-9a-f-]{36}\/\d{1,2}\.(jpg|jpeg|png|webp)$/i;
 
 function storageAdminClient() {
   const url = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -51,4 +52,26 @@ export async function POST(request: NextRequest) {
   }
 
   return NextResponse.json({ uploads });
+}
+
+export async function DELETE(request: NextRequest) {
+  const supabase = storageAdminClient();
+  if (!supabase) {
+    return NextResponse.json({ error: "업로드 저장소가 설정되지 않았습니다." }, { status: 503 });
+  }
+
+  const body = await request.json().catch(() => null);
+  const paths = Array.isArray(body?.paths)
+    ? body.paths.filter((path: unknown): path is string => typeof path === "string" && STORAGE_PATH_PATTERN.test(path)).slice(0, MAX_FILES)
+    : [];
+  if (paths.length === 0) {
+    return NextResponse.json({ error: "삭제할 경로가 필요합니다." }, { status: 400 });
+  }
+
+  const { error } = await supabase.storage.from(UPLOAD_BUCKET).remove(paths);
+  if (error) {
+    console.error(`[upload-url] delete failed: ${error.message}`);
+    return NextResponse.json({ error: "저장소 정리에 실패했습니다." }, { status: 500 });
+  }
+  return NextResponse.json({ removed: paths.length });
 }

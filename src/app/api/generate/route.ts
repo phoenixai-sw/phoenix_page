@@ -17,7 +17,7 @@ const OPENAI_IMAGE_HIGH_TIMEOUT_MS = Number(process.env.OPENAI_IMAGE_HIGH_TIMEOU
 const OPENAI_IMAGE_FALLBACK_TIMEOUT_MS = Number(process.env.OPENAI_IMAGE_FALLBACK_TIMEOUT_MS || 240000);
 const GOOGLE_NANO_BANANA_2_MODEL = "gemini-3.1-flash-image-preview";
 const ANALYSIS_MODEL = process.env.OPENAI_ANALYSIS_MODEL || "gpt-5.5";
-const MAX_REFERENCE_IMAGES = 4;
+const MAX_REFERENCE_IMAGES = 6;
 const MAX_PROJECT_SECTIONS = 12;
 
 type Provider = "openai" | "google";
@@ -49,6 +49,7 @@ export async function POST(request: NextRequest) {
     const form = await request.formData();
     const files = form.getAll("files").filter((file): file is File => file instanceof File);
     const storagePaths = parseStoragePaths(form.get("storagePaths"));
+    const persistStorage = String(form.get("persistStorage") || "") === "true";
     const requestText = String(form.get("request") || "");
     const rolloutRequest = String(form.get("rolloutRequest") || "");
     const knowledgeText = String(form.get("knowledgeText") || "").slice(0, 60000);
@@ -81,9 +82,9 @@ export async function POST(request: NextRequest) {
     }
 
     const jobId = randomUUID();
-    const references = storagePaths.length > 0
-      ? await referencesFromStorage(storagePaths)
-      : await prepareReferenceImages(files);
+    const storageReferences = storagePaths.length > 0 ? await referencesFromStorage(storagePaths, persistStorage) : [];
+    const fileReferences = files.length > 0 ? await prepareReferenceImages(files) : [];
+    const references = [...storageReferences, ...fileReferences].slice(0, MAX_REFERENCE_IMAGES);
     console.info(`[generate] references prepared job=${jobId} references=${references.length}`);
     if (references.length === 0) {
       return NextResponse.json({ error: "이미지 생성에 사용할 참조 이미지가 없습니다. PDF는 브라우저에서 PNG로 변환한 뒤 전송됩니다." }, { status: 400 });
@@ -483,7 +484,7 @@ function parseStoragePaths(value: FormDataEntryValue | null): string[] {
   }
 }
 
-async function referencesFromStorage(paths: string[]): Promise<ReferenceImage[]> {
+async function referencesFromStorage(paths: string[], persistStorage: boolean): Promise<ReferenceImage[]> {
   const supabase = storageAdminClient();
   if (!supabase) throw new Error("업로드 저장소가 설정되지 않았습니다. 잠시 후 다시 시도해주세요.");
 
@@ -500,10 +501,13 @@ async function referencesFromStorage(paths: string[]): Promise<ReferenceImage[]>
     });
   }
 
-  supabase.storage.from(UPLOAD_BUCKET).remove(paths).then(
-    () => console.info(`[generate] storage cleanup done (${paths.length})`),
-    (error: unknown) => console.warn(`[generate] storage cleanup failed: ${error instanceof Error ? error.message : error}`)
-  );
+  // persistStorage=true면 추가 생성용 원본으로 보존한다 (프로젝트 삭제 시 정리).
+  if (!persistStorage) {
+    supabase.storage.from(UPLOAD_BUCKET).remove(paths).then(
+      () => console.info(`[generate] storage cleanup done (${paths.length})`),
+      (error: unknown) => console.warn(`[generate] storage cleanup failed: ${error instanceof Error ? error.message : error}`)
+    );
+  }
 
   return references;
 }

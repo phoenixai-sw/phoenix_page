@@ -15,7 +15,7 @@ export type CloudProjectSummary = {
   updated_at: string;
 };
 
-export type CloudProjectRow = CloudProjectSummary & { sections: unknown };
+export type CloudProjectRow = CloudProjectSummary & { sections: unknown; source_paths: unknown };
 
 export type CloudProjectPayload = {
   localId: string;
@@ -25,6 +25,7 @@ export type CloudProjectPayload = {
   model: string;
   request: string;
   sections: unknown;
+  sourcePaths: string[];
 };
 
 let cachedClient: SupabaseClient | null | undefined;
@@ -96,6 +97,7 @@ export async function upsertCloudProject(payload: CloudProjectPayload) {
       model: payload.model,
       request: payload.request,
       sections: payload.sections,
+      source_paths: payload.sourcePaths,
       updated_at: new Date().toISOString()
     },
     { onConflict: "user_id,local_id" }
@@ -118,7 +120,7 @@ export async function fetchCloudProject(localId: string): Promise<CloudProjectRo
   const supabase = requireSupabase();
   const { data, error } = await supabase
     .from("projects")
-    .select("local_id,title,channel,ratio,model,request,sections,created_at,updated_at")
+    .select("local_id,title,channel,ratio,model,request,sections,source_paths,created_at,updated_at")
     .eq("local_id", localId)
     .maybeSingle();
   if (error) throw new Error(error.message);
@@ -138,6 +140,18 @@ export async function deleteCloudProject(localId: string) {
   const supabase = requireSupabase();
   const { error } = await supabase.from("projects").delete().eq("local_id", localId);
   if (error) throw new Error(error.message);
+}
+
+// 보존 중인 업로드 원본을 서버 경유로 삭제한다 (프로젝트 삭제 시 정리용).
+export async function deleteStoredReferences(paths: string[]) {
+  if (paths.length === 0) return;
+  await fetch("/api/upload-url", {
+    method: "DELETE",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ paths })
+  }).catch(() => {
+    // 저장소 정리 실패가 프로젝트 삭제 흐름을 막으면 안 된다.
+  });
 }
 
 // 업로드 원본을 Supabase Storage로 직접 올려 Vercel 요청 본문 한도(4.5MB)를 우회한다.
