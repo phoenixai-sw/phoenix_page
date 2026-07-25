@@ -16,3 +16,4 @@ pnpm-debug.log*
 .env*
 
 tsconfig.tsbuildinfo
+next-env.d.ts
