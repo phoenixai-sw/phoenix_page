@@ -2950,13 +2950,14 @@ function InfoTip({ label, align = "center", children }: { label: string; align?:
         type="button"
         aria-label={label}
         aria-expanded={open}
-        className="grid size-5 place-items-center rounded-full text-muted-foreground transition hover:text-[#0f766e] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#99e5d8]"
+        className="inline-flex shrink-0 items-center gap-1 rounded-full border border-[#bfeee7] bg-[#f4fbf9] px-2 py-0.5 text-[11px] font-semibold text-[#0f766e] transition hover:border-[#0f766e] hover:bg-[#e9fbf7] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#99e5d8]"
         onMouseEnter={() => setOpen(true)}
         onMouseLeave={() => setOpen(false)}
         onClick={() => setOpen((current) => !current)}
         onBlur={() => setOpen(false)}
       >
-        <CircleHelp className="size-4" />
+        <CircleHelp className="size-3" />
+        상세 안내
       </button>
       {open && (
         <span
