@@ -2883,8 +2883,8 @@ function Results({
       </Topbar>
 
       <Dialog open={mergeOpen} onOpenChange={setMergeOpen}>
-        <DialogContent>
-          <DialogHeader className="relative">
+        <DialogContent className="flex max-h-[92vh] flex-col">
+          <DialogHeader className="relative shrink-0">
             <button
               type="button"
               aria-label="닫기"
@@ -2898,7 +2898,7 @@ function Results({
               {downloadableSections.length}장을 위에서 아래로 이어붙인 통이미지(JPG)로 저장합니다. 파일명에 폭이 기록됩니다. (예: 제목-한장-860px.jpg)
             </DialogDescription>
           </DialogHeader>
-          <div className="grid max-h-[52vh] gap-2 overflow-y-auto">
+          <div className="grid min-h-0 gap-2 overflow-y-auto p-4">
             {[
               { width: 1080, label: "1080px · 원본 화질(마스터)", detail: "보관·재편집·자사몰용 — 축소는 가능, 확대는 불가" },
               { width: 860, label: "860px · 스마트스토어 권장", detail: "상세 본문에 딱 맞는 폭 — 재압축 열화 최소화" },
@@ -2990,7 +2990,7 @@ function Results({
               })()}
             </div>
           </div>
-          <div className="grid gap-1 text-xs text-muted-foreground">
+          <div className="grid shrink-0 gap-1 border-t border-border bg-[#fbfdfc] p-4 text-xs text-muted-foreground">
             <p>💡 고민되면 <strong>1080px(마스터)</strong>를 받아두세요 — 나중에 어떤 크기로든 줄일 수 있습니다.</p>
             <p>📄 분할 저장 시 파일명에 1부·2부가 붙습니다. 폭이 좁을수록 더 많은 장수도 한 파일로 저장됩니다.</p>
             <p>🗂 장별 개별 파일이 필요하면 <strong>다운로드(낱장)</strong>을 이용하세요.</p>
