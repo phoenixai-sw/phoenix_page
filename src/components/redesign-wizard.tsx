@@ -2932,8 +2932,9 @@ function Results({
             })}
 
             <div className="rounded-md border border-border bg-white p-3">
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 <span className="text-sm font-semibold">직접 입력</span>
+                <span className="text-xs text-muted-foreground">가로</span>
                 <Input
                   value={customWidth}
                   onChange={(event) => setCustomWidth(event.target.value.replace(/[^0-9]/g, ""))}
@@ -2943,7 +2944,21 @@ function Results({
                   placeholder="900"
                   inputMode="numeric"
                   aria-label="직접 입력 가로 폭(px)"
-                  className="h-8 w-24"
+                  className="h-8 w-20"
+                />
+                <span className="text-sm text-muted-foreground">×</span>
+                <span className="text-xs text-muted-foreground">세로(자동)</span>
+                <Input
+                  value={(() => {
+                    const width = Number(customWidth);
+                    if (!customWidth || !Number.isFinite(width) || width <= 0) return "";
+                    return Math.round(width / ratioNumber(project?.ratio || "9:16")).toLocaleString();
+                  })()}
+                  readOnly
+                  tabIndex={-1}
+                  placeholder="자동 계산"
+                  aria-label="자동 계산된 1장 세로 높이(px)"
+                  className="h-8 w-24 bg-[#f4fbf9] text-[#0f766e]"
                 />
                 <span className="text-sm text-muted-foreground">px</span>
                 <Button size="sm" disabled={merging || !customWidth} onClick={() => downloadMergedImage(Number(customWidth))}>
