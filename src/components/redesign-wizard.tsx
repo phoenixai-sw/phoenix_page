@@ -34,6 +34,9 @@ import { Textarea } from "@/components/ui/textarea";
 import {
   type CloudProjectSummary,
   type CloudUser,
+  CLOUD_RETENTION_DAYS,
+  MAX_CLOUD_PROJECTS,
+  cleanupExpiredCloudProjects,
   deleteCloudProject,
   deleteStoredReferences,
   fetchCloudProject,
@@ -312,6 +315,11 @@ export function RedesignWizard() {
   }, []);
 
   React.useEffect(() => subscribeCloudUser(setCloudUser), []);
+
+  // 로그인 시 보존 기간(7일)이 지난 본인 클라우드 저장분을 정리한다 (학습용 정책).
+  React.useEffect(() => {
+    if (cloudUser) void cleanupExpiredCloudProjects();
+  }, [cloudUser?.id]);
 
   React.useEffect(() => {
     if (!toast) return;
@@ -1134,7 +1142,9 @@ export function RedesignWizard() {
           <DialogHeader>
             <DialogTitle>내 클라우드 프로젝트</DialogTitle>
             <DialogDescription>
-              {cloudUser ? `${cloudUser.email} 계정에 저장된 작업 목록입니다. 불러오면 이 기기의 홈보드에 추가됩니다.` : "Google 로그인 후 사용할 수 있습니다."}
+              {cloudUser
+                ? `${cloudUser.email} 계정에 저장된 작업 목록입니다. 불러오면 이 기기의 홈보드에 추가됩니다. 학습용 서비스 정책: 최대 ${MAX_CLOUD_PROJECTS}개 저장, 마지막 수정 후 ${CLOUD_RETENTION_DAYS}일이 지나면 자동 삭제됩니다.`
+                : "Google 로그인 후 사용할 수 있습니다."}
             </DialogDescription>
           </DialogHeader>
           <div className="grid max-h-[52vh] gap-2 overflow-y-auto">
@@ -2870,6 +2880,7 @@ function Results({
         <InfoTip label="저장 방식 안내" align="right">
           저장하면 <strong>이 기기(브라우저)</strong>에 보관되고, Google 로그인 상태면 <strong>클라우드에도 자동 동기화</strong>됩니다.
           <br />· 홈보드의 <strong>내 클라우드</strong>에서 다른 기기로도 불러올 수 있습니다
+          <br />· 학습용 정책: 클라우드 저장은 최대 <strong>15개</strong>, 마지막 수정 후 <strong>7일</strong>이 지나면 자동 삭제됩니다
         </InfoTip>
         <Button variant="secondary" onClick={() => onToast("히어로 1장 재생성은 다음 단계에서 연결할 예정입니다.")}><RefreshCw className="size-4" />히어로 다시 생성</Button>
         <Button variant="secondary" onClick={() => setMergeOpen(true)} disabled={downloadableSections.length === 0 || merging}>

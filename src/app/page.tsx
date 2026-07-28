@@ -1,5 +1,6 @@
 import Image from "next/image";
 import Link from "next/link";
+import { EntryCta } from "@/components/entry-cta";
 
 export default function Page() {
   return (
@@ -25,17 +26,16 @@ export default function Page() {
 
       <section className="relative z-10 grid min-h-[calc(100vh-9rem)] place-items-center px-5 py-12 text-center">
         <div className="grid justify-items-center gap-4">
-          <Link
-            href="/studio"
-            className="inline-flex min-h-11 items-center justify-center rounded-md bg-[#ff6f61] px-5 text-xs font-black text-white shadow-[0_18px_45px_rgba(255,111,97,0.34)] transition hover:bg-[#ff806f]"
-          >
-            phoenix detail page 입장
-          </Link>
+          <EntryCta />
         </div>
       </section>
 
-      <footer className="relative z-10 flex min-h-16 items-center justify-center border-t border-white/10 px-4 text-xs font-semibold text-white/68">
-        PhoenixAI
+      <footer className="relative z-10 flex min-h-16 flex-wrap items-center justify-center gap-x-4 gap-y-1 border-t border-white/10 px-4 text-xs font-semibold text-white/68">
+        <span>PhoenixAI · 학습용 베타</span>
+        <span className="flex items-center gap-3 font-normal text-white/50">
+          <Link href="/terms" className="hover:text-white/80">이용약관</Link>
+          <Link href="/privacy" className="hover:text-white/80">개인정보처리방침</Link>
+        </span>
       </footer>
     </main>
   );

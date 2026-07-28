@@ -82,10 +82,31 @@ export async function signOutCloud() {
   if (error) throw new Error(error.message);
 }
 
+// 학습용 무료 플랫폼 보호 정책: 1인당 저장 한도 + 보존 기간 (Supabase 무료 티어 500MB 안에서 운영)
+export const MAX_CLOUD_PROJECTS = 15;
+export const CLOUD_RETENTION_DAYS = 7;
+
 export async function upsertCloudProject(payload: CloudProjectPayload) {
   const supabase = requireSupabase();
   const { data: userData, error: userError } = await supabase.auth.getUser();
   if (userError || !userData.user) throw new Error("클라우드 저장은 Google 로그인 후 사용할 수 있습니다.");
+
+  // 기존 프로젝트 갱신은 한도와 무관하게 허용하고, 새 프로젝트만 한도를 검사한다.
+  const { data: existing } = await supabase
+    .from("projects")
+    .select("local_id")
+    .eq("local_id", payload.localId)
+    .maybeSingle();
+  if (!existing) {
+    const { count } = await supabase
+      .from("projects")
+      .select("local_id", { count: "exact", head: true });
+    if ((count ?? 0) >= MAX_CLOUD_PROJECTS) {
+      throw new Error(
+        `학습용 저장 한도(${MAX_CLOUD_PROJECTS}개)에 도달했습니다. 내 클라우드에서 오래된 프로젝트를 삭제한 뒤 다시 저장해 주세요.`
+      );
+    }
+  }
 
   const { error } = await supabase.from("projects").upsert(
     {
@@ -105,8 +126,36 @@ export async function upsertCloudProject(payload: CloudProjectPayload) {
   if (error) throw new Error(error.message);
 }
 
+// 보존 기간(7일)이 지난 본인 프로젝트를 정리한다 (학습용 정책, RLS로 본인 것만 삭제됨).
+// 실패해도 목록 조회 등 호출부 흐름을 막지 않도록 조용히 넘어간다.
+export async function cleanupExpiredCloudProjects(): Promise<number> {
+  const supabase = getSupabase();
+  if (!supabase) return 0;
+  try {
+    const { data: userData } = await supabase.auth.getUser();
+    if (!userData.user) return 0;
+    const cutoff = new Date(Date.now() - CLOUD_RETENTION_DAYS * 24 * 60 * 60 * 1000).toISOString();
+    const { data: expired, error } = await supabase
+      .from("projects")
+      .select("local_id,source_paths")
+      .lt("updated_at", cutoff);
+    if (error || !expired || expired.length === 0) return 0;
+
+    const ids = expired.map((row) => row.local_id);
+    const { error: deleteError } = await supabase.from("projects").delete().in("local_id", ids);
+    if (deleteError) return 0;
+
+    const paths = expired.flatMap((row) => (Array.isArray(row.source_paths) ? (row.source_paths as string[]) : []));
+    void deleteStoredReferences(paths);
+    return expired.length;
+  } catch {
+    return 0;
+  }
+}
+
 export async function listCloudProjects(): Promise<CloudProjectSummary[]> {
   const supabase = requireSupabase();
+  await cleanupExpiredCloudProjects();
   const { data, error } = await supabase
     .from("projects")
     .select("local_id,title,channel,ratio,model,request,created_at,updated_at")
