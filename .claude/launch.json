@@ -6,6 +6,18 @@
       "runtimeExecutable": "npm",
       "runtimeArgs": ["run", "dev:local"],
       "port": 3002
+    },
+    {
+      "name": "studio-dev",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["--prefix", "C:\\codex\\agent\\phoenix_studio", "run", "dev", "--", "-p", "3003"],
+      "port": 3003
+    },
+    {
+      "name": "studio-dev-2",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["--prefix", "C:\\codex\\agent\\phoenix_studio", "run", "dev", "--", "-p", "3004"],
+      "port": 3004
     }
   ]
 }
